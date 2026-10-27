@@ -1,55 +1,114 @@
-# Nudity Detection with Google Cloud Vision API
+# nude-detector
+
+A small Python CLI that sorts the images in a folder into sub-folders by their adult-content likelihood, using Google Cloud Vision SafeSearch.
 
 ## Overview
-This Python script uses the Google Cloud Vision API to detect nudity in images. It classifies images into different levels of likelihood for containing adult content and optionally moves the files into corresponding folders based on their likelihood levels.
+
+`nude.py` sends every file in a folder to the Cloud Vision API's
+[SafeSearch detection](https://cloud.google.com/vision/docs/detecting-safe-search), reads the `adult` likelihood
+(`VERY_UNLIKELY` … `VERY_LIKELY`) and **moves** each image into a sub-folder named after that level. It is useful for
+quickly triaging a large folder of images before manual review.
 
 ## Features
-- Classifies images using Google Cloud Vision API's Safe Search Detection.
-- Moves images into sub-folders based on their adult content likelihood level.
-- Takes a folder path as an argument, and if not provided, defaults to the current directory.
-- Creates necessary sub-folders for classification inside the path provided.
 
-## Requirements
-- Python 3.x
-- `google-cloud-vision` Python package
-- Google Cloud Platform account with Vision API enabled
-- Google Cloud Service Account and corresponding JSON credentials file
+- One SafeSearch request per file; a single Vision client is reused for the whole run.
+- Creates five destination folders inside the target folder: `very_unlikely`, `unlikely`, `possible`, `likely`,
+  `very_likely`.
+- Moves each processed file into its folder and prints `<filename>: <level>`.
+- Target folder is set with `--f` (defaults to the current directory).
+- Only top-level files are processed; sub-folders are ignored.
 
-## Installation
+## Architecture
 
-### Install Python Package Dependencies
-Run the following command to install the required Python package:
-```bash
-pip install google-cloud-vision
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant S as nude.py
+    participant V as Cloud Vision API
+    participant FS as Target folder
+    U->>S: python nude.py --f <folder>
+    S->>FS: create very_unlikely/ … very_likely/
+    loop each file in <folder>
+        S->>FS: read bytes
+        S->>V: safe_search_detection(image)
+        V-->>S: safe_search_annotation.adult
+        S->>FS: move file to <folder>/<level>/
+        S-->>U: print "<file>: <level>"
+    end
 ```
 
-### Set Up Google Cloud
-1. Create a project in the [Google Cloud Console](https://console.cloud.google.com/).
-2. Enable the Vision API.
-3. Create a service account and download the JSON credentials file.
-4. Set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable to the path of the JSON credentials file.
+## Requirements
+
+- Python 3.7+
+- `google-cloud-vision` (there is no `requirements.txt`)
+- A Google Cloud project with the Vision API enabled and a service account JSON key that can call it
+
+## Installation and quick start
+
 ```bash
-export GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
+git clone https://github.com/Lapeyus/nude-detector.git
+cd nude-detector
+python -m venv .venv && source .venv/bin/activate
+pip install google-cloud-vision
+
+# Place the service account key next to where you run the script:
+cp /path/to/service-account.json ./credentials.json
+
+python nude.py --f /path/to/images
 ```
 
 ## Usage
 
-### Basic Usage
-Run the script without any arguments to process images in the `nude` sub-folder of the current directory:
 ```bash
-python nudity_detection.py
+python nude.py               # process files in the current directory
+python nude.py --f ./photos  # process files in ./photos
 ```
 
-### Specify Folder
-Use the `--f` flag to specify a different folder to process:
-```bash
-python nudity_detection.py --f /path/to/folder
+Example output:
+
+```text
+img_001.jpg: very_unlikely
+img_002.jpg: possible
 ```
 
-This will process the images in the `nude` sub-folder of the specified folder and create sub-folders for classification there.
+Files are **moved**, not copied. Work on a copy of the folder if you need to keep the original layout.
+
+## Repository structure
+
+```text
+nude-detector/
+├── nude.py                  # The whole tool: argument parsing, folder setup, SafeSearch call, file moves
+├── .pre-commit-config.yaml  # Generic pre-commit hooks (large files, JSON, merge conflicts, symlinks, ...)
+├── .gitignore
+├── LICENSE                  # Apache License 2.0
+└── README.md
+```
+
+## Configuration
+
+- **Credentials:** the script sets `GOOGLE_APPLICATION_CREDENTIALS=credentials.json` at import time, overriding any value
+  already in your environment. The key file must be named `credentials.json` and live in the **current working
+  directory**. Never commit it; add it to `.gitignore`.
+- No other settings; the only CLI flag is `--f`.
+
+## Tests
+
+There are no automated tests. Running the script requires real Google Cloud credentials and incurs Vision API usage.
+
+## Project status
+
+Small utility, not actively developed. Two commits, the last on 2023-09-25.
+
+## Known limitations
+
+- Every regular file in the folder is sent to the API, including non-images; a non-image file makes the request fail
+  and stops the run (no error handling).
+- If the API returns `UNKNOWN`, the script tries to move the file to an `unknown/` folder that it never creates, which
+  raises an error.
+- Only the `adult` category is used; `racy`, `violence`, `medical` and `spoof` are ignored.
+- Requests are sequential; large folders are slow.
+- The hard-coded `credentials.json` path cannot be changed without editing the script.
 
 ## License
-MIT License. See `LICENSE` file for details.
 
-## Contributing
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+Apache License 2.0. See [LICENSE](LICENSE).
